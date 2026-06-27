@@ -153,6 +153,11 @@ void sport_eyes_filter_ensure_tracking_setup(void *data)
 
 void sport_eyes_filter_defaults(obs_data_t *settings)
 {
+	obs_data_set_default_string(settings, "profile_selected", "");
+	obs_data_set_default_string(settings, "profile_name", "Basket 180");
+	obs_data_set_default_string(settings, "profile_export_path", "");
+	obs_data_set_default_string(settings, "profile_import_path", "");
+
 	obs_data_set_default_bool(settings, "advanced", false);
 #if _WIN32
 	obs_data_set_default_string(settings, "useGPU", USEGPU_DML);

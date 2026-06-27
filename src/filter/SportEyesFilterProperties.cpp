@@ -36,6 +36,78 @@ static bool csv_logging_enabled_modified(obs_properties_t *props, obs_property_t
 	return true;
 }
 
+static bool profile_apply_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	sport_eyes_profile_apply_selected(static_cast<detect_filter *>(data));
+	return true;
+}
+
+static bool profile_save_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	sport_eyes_profile_save_current(static_cast<detect_filter *>(data));
+	return true;
+}
+
+static bool profile_delete_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	sport_eyes_profile_delete_selected(static_cast<detect_filter *>(data));
+	return true;
+}
+
+static bool profile_export_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	sport_eyes_profile_export_current(static_cast<detect_filter *>(data));
+	return true;
+}
+
+static bool profile_import_clicked(obs_properties_t *, obs_property_t *, void *data)
+{
+	sport_eyes_profile_import_and_apply(static_cast<detect_filter *>(data));
+	return true;
+}
+
+static void add_configuration_profiles_group(obs_properties_t *props, detect_filter *tf)
+{
+	obs_properties_t *profileProps = obs_properties_create();
+	obs_properties_add_group(props, "configuration_profiles", "Configuration Profiles",
+		OBS_GROUP_NORMAL, profileProps);
+
+	obs_property_t *profileSelector = obs_properties_add_list(
+		profileProps, "profile_selected", "Profile", OBS_COMBO_TYPE_LIST,
+		OBS_COMBO_FORMAT_STRING);
+	for (const SportEyesProfileEntry &entry : sport_eyes_profile_list())
+		obs_property_list_add_string(profileSelector, entry.label.c_str(), entry.id.c_str());
+
+	obs_properties_add_text(profileProps, "profile_name", "Profile name", OBS_TEXT_DEFAULT);
+	obs_properties_add_button2(profileProps, "profile_apply_selected", "Apply selected profile",
+		profile_apply_clicked, tf);
+	obs_properties_add_button2(profileProps, "profile_save_current", "Save / update profile",
+		profile_save_clicked, tf);
+	obs_properties_add_button2(profileProps, "profile_delete_selected", "Delete selected saved profile",
+		profile_delete_clicked, tf);
+
+	obs_properties_add_text(profileProps, "profile_json_export_info",
+		"Export writes the current supported configuration to a portable JSON file.",
+		OBS_TEXT_INFO);
+	obs_properties_add_path(profileProps, "profile_export_path", "Export JSON file",
+		OBS_PATH_FILE_SAVE, "JSON (*.json)", nullptr);
+	obs_properties_add_button2(profileProps, "profile_export_json", "Export current configuration",
+		profile_export_clicked, tf);
+
+	obs_properties_add_text(profileProps, "profile_json_import_info",
+		"Import applies a JSON profile immediately. Use Save / update profile afterwards to keep it in the local library.",
+		OBS_TEXT_INFO);
+	obs_properties_add_path(profileProps, "profile_import_path", "Import JSON file",
+		OBS_PATH_FILE, "JSON (*.json)", nullptr);
+	obs_properties_add_button2(profileProps, "profile_import_json", "Import and apply JSON",
+		profile_import_clicked, tf);
+
+	const std::string status = tf && !tf->profileStatus.empty()
+		? tf->profileStatus
+		: "Saved profiles are stored in the OBS Sport Eyes module configuration folder.";
+	obs_properties_add_text(profileProps, "profile_status_info", status.c_str(), OBS_TEXT_INFO);
+}
+
 void set_class_names_on_object_category(obs_property_t *object_category,
 					std::vector<std::string> class_names)
 {
@@ -104,6 +176,8 @@ obs_properties_t *sport_eyes_filter_properties(void *data)
 	struct detect_filter *tf = reinterpret_cast<detect_filter *>(data);
 
 	obs_properties_t *props = obs_properties_create();
+
+	add_configuration_profiles_group(props, tf);
 
 	obs_properties_add_bool(props, "preview", obs_module_text("Preview"));
 

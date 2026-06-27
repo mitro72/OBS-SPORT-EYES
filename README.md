@@ -4,7 +4,7 @@
 
 Il plugin analizza il video tramite modelli di object detection eseguiti con **OpenVINO**, individua i giocatori e costruisce un'inquadratura dinamica da applicare alla sorgente. L'obiettivo non è semplicemente “seguire l'oggetto più grande”, ma mantenere una ripresa leggibile dell'azione: stabile nei possessi, pronta sui cambi di lato e resistente a panchine, pubblico e rilevazioni marginali.
 
-Questa repository contiene la versione **1.10.0f** del progetto.
+Questa repository contiene la versione **1.10.0m** del progetto.
 
 > Stato del progetto: sviluppo sperimentale, orientato a test sul campo. Prima di usare una build in una partita importante, eseguire sempre una prova con la stessa camera, risoluzione e rete previste per la diretta.
 
@@ -156,6 +156,18 @@ I CSV sono pensati per confrontare configurazioni diverse e misurare oggettivame
 | **Min confidence** | Confidence minima per applicare la previsione. |
 
 ---
+
+## Profili di configurazione e JSON
+
+Nelle proprietà del filtro è disponibile il gruppo **Configuration Profiles**.
+
+- I preset **Basket 180 - Balanced**, **Reactive** e **Conservative** applicano tuning sportivo senza modificare modello, device, percorso del modello esterno o destinazioni CSV locali.
+- **Save / update profile** salva la configurazione corrente nella libreria locale del plugin; un nome già esistente viene aggiornato.
+- **Apply selected profile** applica un preset o un profilo salvato.
+- **Export current configuration** crea un JSON portabile.
+- **Import and apply JSON** convalida e applica un JSON; poi **Save / update profile** lo aggiunge alla libreria locale.
+
+I JSON sono versionati tramite `format: "obs-sport-eyes-profile"` e `schema_version: 1`. Vengono importati solo i parametri supportati; non vengono importati scene OBS, filtri helper o stato runtime. La documentazione del formato è in [`docs/README_v1.10.0m_Configuration_Profiles.md`](docs/README_v1.10.0m_Configuration_Profiles.md).
 
 ## Configurazione iniziale consigliata
 
