@@ -1,0 +1,24 @@
+#ifndef CONSTS_H
+#define CONSTS_H
+
+const char *const USEGPU_CPU = "cpu";
+const char *const USEGPU_DML = "dml";
+const char *const USEGPU_CUDA = "cuda";
+const char *const USEGPU_TENSORRT = "tensorrt";
+const char *const USEGPU_COREML = "coreml";
+
+// ✅ OpenVINO
+const char *const USEGPU_OV_CPU = "openvino_cpu";
+const char *const USEGPU_OV_GPU = "openvino_gpu";
+
+const char *const KAWASE_BLUR_EFFECT_PATH = "effects/kawase_blur.effect";
+const char *const MASKING_EFFECT_PATH = "effects/masking.effect";
+const char *const PIXELATE_EFFECT_PATH = "effects/pixelate.effect";
+
+const char *const PLUGIN_INFO_TEMPLATE =
+	"<a href=\"https://github.com/occ-ai/obs-detect/\">OBS Sport Eyes</a> (%1)";
+const char *const PLUGIN_INFO_TEMPLATE_UPDATE_AVAILABLE =
+	"<center><a href=\"https://github.com/occ-ai/obs-detect/releases\">🚀 OBS Sport Eyes update available! (%1)</a></center>";
+
+#endif /* CONSTS_H */
+

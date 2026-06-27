@@ -1,0 +1,39 @@
+name: Auto apply Director AI wiring
+
+on:
+  push:
+    branches:
+      - feature/director-ai-temporal
+    paths:
+      - scripts/apply_director_ai_wiring.py
+      - .github/workflows/auto-apply-director-ai-wiring.yml
+      - src/FilterData.h
+      - src/director_ai/**
+
+permissions:
+  contents: write
+
+jobs:
+  apply-wiring:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/director-ai-temporal
+          fetch-depth: 0
+
+      - name: Apply guarded wiring patch
+        run: python3 scripts/apply_director_ai_wiring.py
+
+      - name: Commit wiring patch if needed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add src/detect-filter.cpp
+          if git diff --cached --quiet; then
+            echo "No wiring changes to commit"
+            exit 0
+          fi
+          git commit -m "Wire Director AI into group crop"
+          git push origin HEAD:feature/director-ai-temporal

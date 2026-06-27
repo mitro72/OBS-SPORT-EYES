@@ -1,0 +1,39 @@
+name: Auto include Director AI logger build
+
+on:
+  push:
+    branches:
+      - feature/director-ai-temporal
+    paths:
+      - scripts/apply_director_ai_logger_build.py
+      - src/director_ai/DirectorAILogger.cpp
+      - src/director_ai/DirectorAILogger.h
+      - .github/workflows/auto-apply-director-ai-logger-build.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-logger-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/director-ai-temporal
+          fetch-depth: 0
+
+      - name: Add logger to CMake
+        run: python3 scripts/apply_director_ai_logger_build.py
+
+      - name: Commit CMake change if needed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CMakeLists.txt
+          if git diff --cached --quiet; then
+            echo "No CMake changes to commit"
+            exit 0
+          fi
+          git commit -m "Include Director AI logger in build"
+          git push origin HEAD:feature/director-ai-temporal

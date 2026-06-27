@@ -1,0 +1,62 @@
+name: Director AI alpha build artifact
+
+on:
+  push:
+    branches:
+      - feature/director-ai-temporal
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    name: Package source artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify Director AI sources are present
+        run: |
+          test -f src/director_ai/TemporalDirector.cpp
+          test -f src/director_ai/WorldState.cpp
+          test -f src/director_ai/CourtModel.cpp
+          test -f src/director_ai/CameraPlanner.cpp
+          test -f src/director_ai/DirectorAIEngine.cpp
+          test -f src/director_ai/DirectorAIIntegration.cpp
+          test -f src/detect-filter.cpp
+          grep -q "director_ai/DirectorAIIntegration.h" src/detect-filter.cpp
+          grep -q "director_ai::update_director_ai" src/detect-filter.cpp
+
+      - name: Create source package
+        run: |
+          mkdir -p dist
+          git archive --format=zip --output=dist/OBS-SPORT-EYES-director-ai-alpha-source.zip HEAD
+          git rev-parse HEAD > dist/commit.txt
+
+      - name: Upload source artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OBS-SPORT-EYES-director-ai-alpha-source
+          path: dist/
+
+  linux-configure:
+    name: Linux configure check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install configure dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build pkg-config libopencv-dev
+
+      - name: Configure placeholder
+        run: |
+          echo "Full OBS/OpenVINO build requires the existing project toolchain and binary dependencies."
+          echo "This job validates source packaging and Director AI wiring markers."
