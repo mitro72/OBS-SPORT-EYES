@@ -35,6 +35,7 @@
 #include "edgeyolo/coco_names.hpp"
 #include "yunet/YuNetOpenVINO.h"
 #include "director_ai/DirectorAIIntegration.h"
+#include "config/SportEyesProfileManager.h"
 
 #define EXTERNAL_MODEL_SIZE "!!!EXTERNAL_MODEL!!!"
 #define FACE_DETECT_MODEL_SIZE "!!!FACE_DETECT!!!"
