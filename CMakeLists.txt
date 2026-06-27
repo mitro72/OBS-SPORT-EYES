@@ -62,6 +62,7 @@ target_sources(
     src/detect-filter.cpp
     src/filter/SportEyesFilterProperties.cpp
     src/filter/SportEyesFilterLifecycle.cpp
+    src/config/SportEyesProfileManager.cpp
     src/sport/GroupClustering.cpp
     src/pipeline/SportEyesVideoTick.cpp
     src/pipeline/SportEyesAsyncInference.cpp
