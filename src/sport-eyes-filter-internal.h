@@ -150,6 +150,10 @@ struct detect_filter : public filter_data {
     uint64_t last_infer_ts_ns = 0;
     bool cached_objects_valid = false;
     std::vector<Object> cached_objects;
+    uint64_t cachedObjectsCaptureNs = 0;
+    uint64_t cachedObjectsCompletedNs = 0;
+    uint64_t cachedObjectsSequence = 0;
+    float cachedObjectsInferenceMs = 0.0f;
     std::string x_pan_preset = "auto";
     int x_snap_state = 1;
     float x_snap_transition_time = 0.25f;
@@ -167,6 +171,8 @@ void *sport_eyes_filter_create(obs_data_t *settings, obs_source_t *source);
 void sport_eyes_filter_destroy(void *data);
 void sport_eyes_filter_activate(void *data);
 void sport_eyes_filter_deactivate(void *data);
+constexpr uint32_t TRACKING_SETUP_STARTUP_GRACE_TICKS = 15;
+bool sport_eyes_sync_tracking_filters(detect_filter *filter, bool allowCreate);
 void sport_eyes_filter_ensure_tracking_setup(void *data);
 void sport_eyes_filter_video_tick(void *data, float seconds);
 void sport_eyes_filter_video_render(void *data, gs_effect_t *_effect);
@@ -178,7 +184,24 @@ bool sport_eyes_async_inference_submit(struct detect_filter *tf, const cv::Mat &
 	float scale, uint64_t captureNs, const cv::Point &cropOrigin);
 bool sport_eyes_async_inference_try_get(struct detect_filter *tf,
 	std::vector<Object> &objectsOut, uint64_t &captureNsOut,
-	uint64_t &completedNsOut, cv::Point &cropOriginOut);
+	uint64_t &completedNsOut, cv::Point &cropOriginOut,
+	uint64_t &sequenceOut, float &inferenceMsOut);
+
+struct SportEyesAsyncTelemetry {
+	bool workerBusy = false;
+	bool taskPending = false;
+	uint64_t lastSubmitNs = 0;
+	uint64_t submittedCount = 0;
+	uint64_t completedCount = 0;
+	uint64_t replacedCount = 0;
+	uint64_t resultOverwrittenCount = 0;
+	uint64_t pendingSequence = 0;
+	uint64_t resultSequence = 0;
+	float lastInferenceMs = 0.0f;
+};
+
+void sport_eyes_async_inference_snapshot(struct detect_filter *tf,
+	SportEyesAsyncTelemetry &snapshotOut);
 
 struct SportEyesCsvSample {
 	uint64_t timestampNs = 0;
@@ -192,6 +215,22 @@ struct SportEyesCsvSample {
 	cv::Rect2f actionBox;
 	cv::Rect2f cropBox;
 	bool directorApplied = false;
+	bool asyncEnabled = false;
+	bool resultFresh = false;
+	float resultAgeMs = 0.0f;
+	float resultCompletionAgeMs = 0.0f;
+	float inferenceMs = 0.0f;
+	bool asyncWorkerBusy = false;
+	bool asyncTaskPending = false;
+	uint64_t asyncReplacedCount = 0;
+	uint64_t asyncResultOverwrittenCount = 0;
+	uint64_t asyncSubmittedCount = 0;
+	uint64_t asyncCompletedCount = 0;
+	uint64_t asyncPendingSequence = 0;
+	uint64_t resultSequence = 0;
+	uint64_t appliedSequence = 0;
+	std::string directorMeasurementState = "fallback_center";
+	float directorMeasurementAgeMs = 0.0f;
 };
 
 void sport_eyes_csv_logging_reconfigure(struct detect_filter *tf, bool enabled,

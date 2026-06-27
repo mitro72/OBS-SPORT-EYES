@@ -1,41 +1,30 @@
-# Exclude everything
-/*
-*.old
-*.last
-*.bak
-*.tmp
-
-# build
-build/
+# Build / IDE
+build*/
+release/
 out/
-*.obj
-*.pdb
-*.ilk
-
-# OS / editor
-.vscode/
+.vs/
 .idea/
-# Except for default project files
-!/.github
-!/build-aux
-!/cmake
-!/data
-!/src
-!.clang-format
-!.cmake-format.json
-!.gitignore
-!buildspec.json
-!CMakeLists.txt
-!CMakePresets.json
-!LICENSE
-!README.md
-!/vendor
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
 
-# Exclude lock files
-*.lock.json
+# Generated dependencies
+.deps/
 
-# Exclude macOS legacy resource forks
+# Binaries and debug artifacts
+*.dll
+*.lib
+*.exp
+*.pdb
+*.obj
+*.ilk
+*.exe
+
+# Runtime diagnostics
+*.csv
+*.log
+
+# Local editor / OS files
 .DS_Store
-
-# Exclude CMake build number cache
-/cmake/.CMakeBuildNumber
+Thumbs.db

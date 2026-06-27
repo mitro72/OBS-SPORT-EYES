@@ -92,7 +92,11 @@ void sport_eyes_write_csv_logs(struct detect_filter *tf, const SportEyesCsvSampl
 	static const char *kDiagnosticsHeader =
 		"timestamp_ns,frame_width,frame_height,objects_total,objects_visible,tracking_enabled,"
 		"group_cluster_valid,lost_tracking,safe_roi_holding,action_x,action_y,action_w,action_h,"
-		"crop_x,crop_y,crop_w,crop_h,director_enabled,director_applied";
+		"crop_x,crop_y,crop_w,crop_h,director_enabled,director_applied,"
+		"async_enabled,result_fresh,result_age_ms,result_completion_age_ms,inference_ms,"
+		"async_worker_busy,async_task_pending,async_replaced_count,async_result_overwritten_count,async_submitted_count,"
+		"async_completed_count,async_pending_sequence,result_sequence,applied_sequence,"
+		"director_measurement_state,director_measurement_age_ms";
 	if (open_csv(tf->diagnosticsCsv, tf->diagnosticsCsvPath, kDiagnosticsHeader,
 			tf->diagnosticsCsvHeaderWritten, tf->diagnosticsCsvOpenErrorLogged, "diagnostics")) {
 		tf->diagnosticsCsv << sample.timestampNs << ','
@@ -107,7 +111,23 @@ void sport_eyes_write_csv_logs(struct detect_filter *tf, const SportEyesCsvSampl
 			<< sample.cropBox.x << ',' << sample.cropBox.y << ','
 			<< sample.cropBox.width << ',' << sample.cropBox.height << ','
 			<< (tf->directorAIEnabled ? 1 : 0) << ','
-			<< (sample.directorApplied ? 1 : 0) << '\n';
+			<< (sample.directorApplied ? 1 : 0) << ','
+			<< (sample.asyncEnabled ? 1 : 0) << ','
+			<< (sample.resultFresh ? 1 : 0) << ','
+			<< sample.resultAgeMs << ','
+			<< sample.resultCompletionAgeMs << ','
+			<< sample.inferenceMs << ','
+			<< (sample.asyncWorkerBusy ? 1 : 0) << ','
+			<< (sample.asyncTaskPending ? 1 : 0) << ','
+			<< sample.asyncReplacedCount << ','
+			<< sample.asyncResultOverwrittenCount << ','
+			<< sample.asyncSubmittedCount << ','
+			<< sample.asyncCompletedCount << ','
+			<< sample.asyncPendingSequence << ','
+			<< sample.resultSequence << ','
+			<< sample.appliedSequence << ','
+			<< sample.directorMeasurementState << ','
+			<< sample.directorMeasurementAgeMs << '\n';
 		tf->diagnosticsCsv.flush();
 	}
 
@@ -120,6 +140,13 @@ void sport_eyes_write_csv_logs(struct detect_filter *tf, const SportEyesCsvSampl
 		row.timestamp_ns = sample.timestampNs;
 		row.frame = tf->lastDirectorAIFrame;
 		row.applied_to_crop = sample.directorApplied;
+		row.measurement_state = sample.directorMeasurementState;
+		row.measurement_age_ms = sample.directorMeasurementAgeMs;
+		row.result_fresh = sample.resultFresh;
+		row.result_sequence = sample.resultSequence;
+		row.async_inference_ms = sample.inferenceMs;
+		row.async_worker_busy = sample.asyncWorkerBusy;
+		row.pending_replaced_count = sample.asyncReplacedCount;
 		tf->directorCsv << director_ai::director_ai_csv_row(row) << '\n';
 		tf->directorCsv.flush();
 	}

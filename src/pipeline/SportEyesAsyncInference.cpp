@@ -8,6 +8,7 @@ void worker(detect_filter *tf)
 		float scale = 1.0f;
 		uint64_t captureNs = 0;
 		uint64_t generation = 0;
+		uint64_t sequence = 0;
 		cv::Point cropOrigin(0, 0);
 		{
 			std::unique_lock<std::mutex> lock(tf->asyncInferenceMutex);
@@ -20,8 +21,10 @@ void worker(detect_filter *tf)
 			scale = tf->asyncInferencePendingScale;
 			captureNs = tf->asyncInferencePendingCaptureNs;
 			generation = tf->asyncInferencePendingGeneration;
+			sequence = tf->asyncInferencePendingSequence;
 			cropOrigin = tf->asyncInferencePendingCropOrigin;
 			tf->asyncInferenceTaskPending = false;
+			tf->asyncInferencePendingSequence = 0;
 			tf->asyncInferenceWorkerBusy = true;
 		}
 
@@ -49,10 +52,13 @@ void worker(detect_filter *tf)
 		std::lock_guard<std::mutex> lock(tf->asyncInferenceMutex);
 		tf->asyncInferenceWorkerBusy = false;
 		if (!tf->asyncInferenceStop && generation == tf->asyncInferenceGeneration) {
+			if (tf->asyncInferenceResultReady)
+				++tf->asyncInferenceResultOverwritten;
 			tf->asyncInferenceResultObjects = std::move(objects);
 			tf->asyncInferenceResultCaptureNs = captureNs;
 			tf->asyncInferenceResultCompletedNs = completedNs;
 			tf->asyncInferenceResultCropOrigin = cropOrigin;
+			tf->asyncInferenceResultSequence = sequence;
 			tf->asyncInferenceLastMs = (float)(completedNs - startNs) / 1000000.0f;
 			tf->asyncInferenceResultReady = true;
 			++tf->asyncInferenceCompleted;
@@ -100,6 +106,8 @@ void sport_eyes_async_inference_reset(detect_filter *tf)
 	tf->asyncInferenceResultObjects.clear();
 	tf->asyncInferenceResultCaptureNs = 0;
 	tf->asyncInferenceResultCompletedNs = 0;
+	tf->asyncInferenceResultSequence = 0;
+	tf->asyncInferencePendingSequence = 0;
 	tf->asyncInferenceLastSubmitNs = 0;
 }
 
@@ -125,6 +133,7 @@ bool sport_eyes_async_inference_submit(detect_filter *tf, const cv::Mat &bgr,
 		tf->asyncInferencePendingScale = scale;
 		tf->asyncInferencePendingCaptureNs = captureNs;
 		tf->asyncInferencePendingGeneration = tf->asyncInferenceGeneration;
+		tf->asyncInferencePendingSequence = ++tf->asyncInferenceNextSequence;
 		tf->asyncInferencePendingCropOrigin = cropOrigin;
 		tf->asyncInferenceTaskPending = true;
 		tf->asyncInferenceLastSubmitNs = captureNs;
@@ -136,7 +145,8 @@ bool sport_eyes_async_inference_submit(detect_filter *tf, const cv::Mat &bgr,
 
 bool sport_eyes_async_inference_try_get(detect_filter *tf,
 	std::vector<Object> &objectsOut, uint64_t &captureNsOut,
-	uint64_t &completedNsOut, cv::Point &cropOriginOut)
+	uint64_t &completedNsOut, cv::Point &cropOriginOut,
+	uint64_t &sequenceOut, float &inferenceMsOut)
 {
 	if (!tf)
 		return false;
@@ -147,6 +157,27 @@ bool sport_eyes_async_inference_try_get(detect_filter *tf,
 	captureNsOut = tf->asyncInferenceResultCaptureNs;
 	completedNsOut = tf->asyncInferenceResultCompletedNs;
 	cropOriginOut = tf->asyncInferenceResultCropOrigin;
+	sequenceOut = tf->asyncInferenceResultSequence;
+	inferenceMsOut = tf->asyncInferenceLastMs;
 	tf->asyncInferenceResultReady = false;
 	return true;
+}
+
+void sport_eyes_async_inference_snapshot(detect_filter *tf,
+	SportEyesAsyncTelemetry &snapshotOut)
+{
+	snapshotOut = SportEyesAsyncTelemetry();
+	if (!tf)
+		return;
+	std::lock_guard<std::mutex> lock(tf->asyncInferenceMutex);
+	snapshotOut.workerBusy = tf->asyncInferenceWorkerBusy;
+	snapshotOut.taskPending = tf->asyncInferenceTaskPending;
+	snapshotOut.lastSubmitNs = tf->asyncInferenceLastSubmitNs;
+	snapshotOut.submittedCount = tf->asyncInferenceSubmitted;
+	snapshotOut.completedCount = tf->asyncInferenceCompleted;
+	snapshotOut.replacedCount = tf->asyncInferenceReplaced;
+	snapshotOut.resultOverwrittenCount = tf->asyncInferenceResultOverwritten;
+	snapshotOut.pendingSequence = tf->asyncInferencePendingSequence;
+	snapshotOut.resultSequence = tf->asyncInferenceResultSequence;
+	snapshotOut.lastInferenceMs = tf->asyncInferenceLastMs;
 }

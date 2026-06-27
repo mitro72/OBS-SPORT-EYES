@@ -3,7 +3,81 @@
 
 namespace {
 
-bool sport_eyes_sync_tracking_filters(detect_filter *filter)
+struct TrackingFilterMatches {
+	const char *name = nullptr;
+	std::vector<obs_source_t *> filters;
+};
+
+void collect_tracking_filter(obs_source_t *parent, obs_source_t *candidate, void *param)
+{
+	(void)parent;
+	auto *matches = static_cast<TrackingFilterMatches *>(param);
+	if (matches && candidate && matches->name &&
+		strcmp(obs_source_get_name(candidate), matches->name) == 0) {
+		// Keep an owned reference: duplicate removal below can otherwise invalidate
+		// pointers while OBS is enumerating the parent filter list.
+		obs_source_t *owned = obs_source_get_ref(candidate);
+		if (owned)
+			matches->filters.emplace_back(owned);
+	}
+}
+
+obs_source_t *find_and_deduplicate_tracking_filter(obs_source_t *parent, const char *name)
+{
+	TrackingFilterMatches matches{name, {}};
+	obs_source_enum_filters(parent, collect_tracking_filter, &matches);
+
+	if (matches.filters.empty())
+		return nullptr;
+
+	// The first filter in the parent chain is the authoritative one. The old
+	// startup workaround could create a second helper before OBS restored the
+	// serialized helper filters; remove any exact-name duplicates deterministically.
+	obs_source_t *selected = matches.filters.front();
+	for (size_t i = 1; i < matches.filters.size(); ++i) {
+		obs_log(LOG_WARNING, "OBS Sport Eyes: removing duplicate tracking helper '%s'", name);
+		obs_source_filter_remove(parent, matches.filters[i]);
+		obs_source_release(matches.filters[i]);
+	}
+	return selected;
+}
+
+void release_tracking_filter_ref(obs_source_t *&source)
+{
+	if (source) {
+		obs_source_release(source);
+		source = nullptr;
+	}
+}
+
+void replace_tracking_filter_ref(obs_source_t *&slot, obs_source_t *source)
+{
+	if (slot == source) {
+		// find_and_deduplicate_tracking_filter returns an owned reference even
+		// when the selected OBS source did not change.
+		if (source)
+			obs_source_release(source);
+		return;
+	}
+	release_tracking_filter_ref(slot);
+	slot = source;
+}
+
+obs_source_t *create_tracking_helper(obs_source_t *parent, const char *sourceId,
+	const char *name, obs_data_t *settings)
+{
+	obs_source_t *created = obs_source_create(sourceId, name, settings, nullptr);
+	if (!created)
+		return nullptr;
+
+	obs_source_filter_add(parent, created);
+	obs_source_release(created);
+	return find_and_deduplicate_tracking_filter(parent, name);
+}
+
+} // namespace
+
+bool sport_eyes_sync_tracking_filters(detect_filter *filter, bool allowCreate)
 {
 	obs_source_t *parent = obs_filter_get_parent(filter->source);
 	if (!parent) {
@@ -15,60 +89,66 @@ bool sport_eyes_sync_tracking_filters(detect_filter *filter)
 
 	if (!filter->trackingEnabled) {
 		obs_source_t *scaleFilter =
-			obs_source_get_filter_by_name(parent, "Detect Tracking Scale");
-		if (scaleFilter)
+			find_and_deduplicate_tracking_filter(parent, "Detect Tracking Scale");
+		if (scaleFilter) {
 			obs_source_filter_remove(parent, scaleFilter);
-		filter->trackingScaleFilter = nullptr;
+			obs_source_release(scaleFilter);
+		}
+		release_tracking_filter_ref(filter->trackingScaleFilter);
 
 		obs_source_t *cropFilter =
-			obs_source_get_filter_by_name(parent, "Detect Tracking");
-		if (cropFilter)
+			find_and_deduplicate_tracking_filter(parent, "Detect Tracking");
+		if (cropFilter) {
 			obs_source_filter_remove(parent, cropFilter);
-		filter->trackingFilter = nullptr;
+			obs_source_release(cropFilter);
+		}
+		release_tracking_filter_ref(filter->trackingFilter);
 		filter->trackingSetupPending = false;
+		filter->trackingSetupGraceTicks = 0;
 		return true;
 	}
 
-	obs_source_t *cropFilter = obs_source_get_filter_by_name(parent, "Detect Tracking");
-	if (!cropFilter) {
-		cropFilter = obs_source_create("crop_filter", "Detect Tracking", nullptr, nullptr);
-		if (cropFilter)
-			obs_source_filter_add(parent, cropFilter);
-	}
-	filter->trackingFilter = cropFilter;
+	obs_source_t *cropFilter =
+		find_and_deduplicate_tracking_filter(parent, "Detect Tracking");
+	if (!cropFilter && allowCreate)
+		cropFilter = create_tracking_helper(parent, "crop_filter", "Detect Tracking", nullptr);
+	replace_tracking_filter_ref(filter->trackingFilter, cropFilter);
 
 	obs_source_t *scaleFilter =
-		obs_source_get_filter_by_name(parent, "Detect Tracking Scale");
-	if (!scaleFilter) {
+		find_and_deduplicate_tracking_filter(parent, "Detect Tracking Scale");
+	if (!scaleFilter && allowCreate) {
 		obs_data_t *scaleSettings = obs_data_create();
 		obs_data_set_string(scaleSettings, "resolution", "1920x1080");
-		scaleFilter = obs_source_create("scale_filter", "Detect Tracking Scale",
-					       scaleSettings, nullptr);
+		scaleFilter = create_tracking_helper(parent, "scale_filter",
+			"Detect Tracking Scale", scaleSettings);
 		obs_data_release(scaleSettings);
-		if (scaleFilter)
-			obs_source_filter_add(parent, scaleFilter);
 	}
-	filter->trackingScaleFilter = scaleFilter;
+	replace_tracking_filter_ref(filter->trackingScaleFilter, scaleFilter);
 	if (filter->trackingScaleFilter)
 		obs_source_set_enabled(filter->trackingScaleFilter, false);
 
 	filter->trackingSetupPending = !(filter->trackingFilter && filter->trackingScaleFilter);
-	if (filter->trackingSetupPending)
-		obs_log(LOG_WARNING,
-			"OBS Sport Eyes: tracking setup incomplete; retrying at activation");
-	else
+	if (filter->trackingSetupPending) {
+		if (!allowCreate)
+			obs_log(LOG_DEBUG, "OBS Sport Eyes: waiting for OBS filter restore before creating tracking helpers");
+		else
+			obs_log(LOG_WARNING, "OBS Sport Eyes: tracking helper setup incomplete; retrying");
+	} else {
 		obs_log(LOG_INFO, "OBS Sport Eyes: tracking filters ready");
+	}
 	return !filter->trackingSetupPending;
 }
 
-} // namespace
 
 void sport_eyes_filter_ensure_tracking_setup(void *data)
 {
 	struct detect_filter *tf = reinterpret_cast<detect_filter *>(data);
 	if (!tf || !tf->trackingEnabled)
 		return;
-	sport_eyes_sync_tracking_filters(tf);
+
+	// During scene restore, bind existing helpers only. Creation is delayed to
+	// video_tick after a small grace window, preventing duplicate helpers.
+	sport_eyes_sync_tracking_filters(tf, false);
 }
 
 void sport_eyes_filter_defaults(obs_data_t *settings)
@@ -202,8 +282,13 @@ void sport_eyes_filter_update(void *data, obs_data_t *settings)
 	tf->infer_scale = (float)obs_data_get_double(settings, "infer_scale");
 	tf->infer_scale = std::clamp(tf->infer_scale, 0.25f, 1.0f);
 
-	// reset cache on settings change
+	// Reset cached detections and their telemetry on settings change.
 	tf->cached_objects_valid = false;
+	tf->cached_objects.clear();
+	tf->cachedObjectsCaptureNs = 0;
+	tf->cachedObjectsCompletedNs = 0;
+	tf->cachedObjectsSequence = 0;
+	tf->cachedObjectsInferenceMs = 0.0f;
 	tf->last_infer_ts_ns = 0;
 
 	tf->x_deadband = (float)obs_data_get_double(settings, "x_deadband");
@@ -283,8 +368,13 @@ void sport_eyes_filter_update(void *data, obs_data_t *settings)
 
 	// Always synchronise instead of only reacting to a bool transition. This fixes
 	// scene-load startup where the checkbox is already true before the parent exists.
+	const bool trackingStateChanged = (tf->trackingEnabled != newTrackingEnabled);
 	tf->trackingEnabled = newTrackingEnabled;
-	sport_eyes_sync_tracking_filters(tf);
+	if (trackingStateChanged)
+		tf->trackingSetupGraceTicks = 0;
+	// Bind restored helper filters now, but do not create new ones until the
+	// source graph has had time to finish restoring.
+	sport_eyes_sync_tracking_filters(tf, false);
 
 	const std::string newUseGpu = obs_data_get_string(settings, "useGPU");
 	const uint32_t newNumThreads = (uint32_t)obs_data_get_int(settings, "numThreads");
@@ -439,11 +529,13 @@ void sport_eyes_filter_activate(void *data)
 	struct detect_filter *tf = reinterpret_cast<detect_filter *>(data);
 	tf->isDisabled = false;
 
-	// At this point OBS has normally attached the filter to its parent source.
-	// Retry the deferred startup setup without requiring the user to toggle Tracking.
+	// OBS may still be restoring serialized helper filters at activation. Bind
+	// only existing helpers here; creation is delayed from video_tick.
 	if (tf->trackingEnabled && (tf->trackingSetupPending || !tf->trackingFilter ||
-					    !tf->trackingScaleFilter))
+					    !tf->trackingScaleFilter)) {
+		tf->trackingSetupGraceTicks = 0;
 		sport_eyes_filter_ensure_tracking_setup(tf);
+	}
 }
 
 void sport_eyes_filter_deactivate(void *data)
@@ -505,6 +597,9 @@ void sport_eyes_filter_destroy(void *data)
 		sport_eyes_async_inference_stop(tf);
 		sport_eyes_csv_logging_close(tf);
 		tf->isDisabled = true;
+
+		release_tracking_filter_ref(tf->trackingScaleFilter);
+		release_tracking_filter_ref(tf->trackingFilter);
 
 		obs_enter_graphics();
 		gs_texrender_destroy(tf->texrender);

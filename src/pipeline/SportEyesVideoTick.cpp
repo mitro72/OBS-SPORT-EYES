@@ -6,11 +6,15 @@ void sport_eyes_filter_video_tick(void *data, float seconds)
 
 	struct detect_filter *tf = reinterpret_cast<detect_filter *>(data);
 
-	// Scene collections can restore the tracking checkbox before the filter has a
-	// parent source. Retry here as a final safety net; setup is idempotent.
+	// Let OBS finish restoring serialized source filters before creating helpers.
+	// This avoids a race where create/update/activate added new helpers and OBS
+	// subsequently restored the saved ones, resulting in duplicate filters.
 	if (tf->trackingEnabled && (tf->trackingSetupPending || !tf->trackingFilter ||
-					 !tf->trackingScaleFilter))
-		sport_eyes_filter_ensure_tracking_setup(tf);
+					 !tf->trackingScaleFilter)) {
+		const bool allowCreate =
+			++tf->trackingSetupGraceTicks >= TRACKING_SETUP_STARTUP_GRACE_TICKS;
+		sport_eyes_sync_tracking_filters(tf, allowCreate);
+	}
 
 	if (tf->isDisabled || !tf->model) {
 		return;
@@ -48,35 +52,50 @@ void sport_eyes_filter_video_tick(void *data, float seconds)
 	bool detectionsFresh = false;
 	uint64_t detectionCaptureNs = 0;
 	uint64_t detectionCompletedNs = 0;
+	uint64_t detectionSequence = 0;
+	float detectionInferenceMs = 0.0f;
 	cv::Point detectionCropOrigin(0, 0);
+	SportEyesAsyncTelemetry asyncTelemetryBefore;
+	SportEyesAsyncTelemetry asyncTelemetryAfter;
 
 	if (tf->asyncInferenceEnabled) {
+		sport_eyes_async_inference_snapshot(tf, asyncTelemetryBefore);
 		// Consume a completed measurement. Between measurements, reuse the latest
 		// result for framing but do not present it as a new temporal observation.
 		if (sport_eyes_async_inference_try_get(tf, objects, detectionCaptureNs,
-				detectionCompletedNs, detectionCropOrigin)) {
+				detectionCompletedNs, detectionCropOrigin, detectionSequence, detectionInferenceMs)) {
 			for (Object &obj : objects) {
 				obj.rect.x += (float)detectionCropOrigin.x;
 				obj.rect.y += (float)detectionCropOrigin.y;
 			}
-			tf->cached_objects = objects;
-			tf->cached_objects_valid = true;
+			// Cache only after the common post-processing stage below.  In
+			// particular SORT initializes Object::unseenFrames; caching raw detector
+			// objects here made cached async ticks look "unseen" and they were removed
+			// by the hide-unseen filter.
+			tf->cachedObjectsCaptureNs = detectionCaptureNs;
+			tf->cachedObjectsCompletedNs = detectionCompletedNs;
+			tf->cachedObjectsSequence = detectionSequence;
+			tf->cachedObjectsInferenceMs = detectionInferenceMs;
 			tf->last_infer_ts_ns = detectionCaptureNs;
 			detectionsFresh = true;
 		} else if (tf->cached_objects_valid) {
 			objects = tf->cached_objects;
-			detectionCaptureNs = tf->last_infer_ts_ns;
+			detectionCaptureNs = tf->cachedObjectsCaptureNs;
+			detectionCompletedNs = tf->cachedObjectsCompletedNs;
+			detectionSequence = tf->cachedObjectsSequence;
+			detectionInferenceMs = tf->cachedObjectsInferenceMs;
 		}
 
 		const bool due = inferIntervalNs == 0ULL ||
-			(tf->asyncInferenceLastSubmitNs == 0ULL ||
-			 (nowInferNs - tf->asyncInferenceLastSubmitNs) >= inferIntervalNs);
+			(asyncTelemetryBefore.lastSubmitNs == 0ULL ||
+			 (nowInferNs - asyncTelemetryBefore.lastSubmitNs) >= inferIntervalNs);
 		if (due && cropRect.width > 0 && cropRect.height > 0) {
 			cv::Mat bgr;
 			cv::cvtColor(imageBGRA(cropRect), bgr, cv::COLOR_BGRA2BGR);
 			sport_eyes_async_inference_submit(tf, bgr, tf->infer_scale, nowInferNs,
 				cropRect.tl());
 		}
+		sport_eyes_async_inference_snapshot(tf, asyncTelemetryAfter);
 	} else {
 		// Explicit compatibility/debug fallback. This is intentionally blocking.
 		cv::Mat inferenceFrame;
@@ -107,17 +126,24 @@ void sport_eyes_filter_video_tick(void *data, float seconds)
 			obj.rect.x += (float)cropRect.x;
 			obj.rect.y += (float)cropRect.y;
 		}
-		tf->cached_objects = objects;
-		tf->cached_objects_valid = true;
+		// Cache only after the shared post-processing stage below.
 		tf->last_infer_ts_ns = nowInferNs;
 		detectionCaptureNs = nowInferNs;
 		detectionCompletedNs = os_gettime_ns();
+		detectionSequence = ++tf->asyncInferenceNextSequence;
+		detectionInferenceMs = (float)(detectionCompletedNs - detectionCaptureNs) / 1000000.0f;
+		tf->cachedObjectsCaptureNs = detectionCaptureNs;
+		tf->cachedObjectsCompletedNs = detectionCompletedNs;
+		tf->cachedObjectsSequence = detectionSequence;
+		tf->cachedObjectsInferenceMs = detectionInferenceMs;
 		detectionsFresh = true;
+		asyncTelemetryAfter.lastInferenceMs = detectionInferenceMs;
 	}
 
 	const uint64_t detectionAgeNs = detectionCaptureNs > 0 && nowInferNs >= detectionCaptureNs
 		? nowInferNs - detectionCaptureNs : 0ULL;
-	(void)detectionCompletedNs; // retained for diagnostics/extensions.
+	const uint64_t detectionCompletionAgeNs = detectionCompletedNs > 0 && nowInferNs >= detectionCompletedNs
+		? nowInferNs - detectionCompletedNs : 0ULL;
 
 	// update the detected object text input
 	if (objects.size() > 0) {
@@ -161,6 +187,15 @@ if (tf->sortTracking && detectionsFresh) {
 		// Cached detections are not new observations: feeding them into SORT again
 		// creates artificial zero-motion samples and damages temporal tracking.
 		objects = tf->tracker.update(objects);
+	}
+
+	// Store the fully normalised measurement only after min-area/category filters
+	// and (when enabled) SORT have run.  Cached async frames must reuse objects
+	// whose unseenFrames state is defined; otherwise the hide-unseen option
+	// removes every cached detection between completed inferences.
+	if (detectionsFresh) {
+		tf->cached_objects = objects;
+		tf->cached_objects_valid = true;
 	}
 
 	if (!tf->showUnseenObjects) {
@@ -549,6 +584,16 @@ bool useTrackingScaleFilter = false;
 int trackingScaleOutW = 0;
 int trackingScaleOutH = 0;
 
+std::string directorMeasurementState = "fallback_center";
+if (tf->safe_roi_holding)
+	directorMeasurementState = "safe_roi_hold";
+else if (detectionsFresh && finalGroupClusterValid)
+	directorMeasurementState = "fresh_detection";
+else if (detectionsFresh)
+	directorMeasurementState = "fallback_detection";
+else if (tf->lastDirectorAIFrame.valid)
+	directorMeasurementState = "prediction_coast";
+
 if (tf->zoomObject == "group") {
 	// Group mode has TWO separate concepts:
 	// 1) zoom_factor = base 32:9 -> 16:9 pan window, normally 0.50 on a 7680x2160 source.
@@ -580,7 +625,9 @@ if (tf->zoomObject == "group") {
 
 		// A cached bbox remains useful for crop stability, but it must not be
 		// injected again into the temporal model as a new camera observation.
-		if (detectionsFresh) {
+		// A Safe ROI hold is also not a new player observation: feeding it into
+		// Director AI would artificially preserve confidence and damp velocity.
+		if (detectionsFresh && !tf->safe_roi_holding) {
 			director_ai::IntegrationInput directorInput;
 			directorInput.timestamp_ns = detectionCaptureNs ? detectionCaptureNs : nowInferNs;
 			directorInput.action_bbox = boundingBox;
@@ -794,6 +841,12 @@ if (tf->zoomObject == "group") {
 
 			SportEyesCsvSample csvSample;
 			csvSample.timestampNs = os_gettime_ns();
+			const uint64_t csvResultAgeNs =
+				(detectionCaptureNs > 0 && csvSample.timestampNs >= detectionCaptureNs)
+					? csvSample.timestampNs - detectionCaptureNs : 0ULL;
+			const uint64_t csvCompletionAgeNs =
+				(detectionCompletedNs > 0 && csvSample.timestampNs >= detectionCompletedNs)
+					? csvSample.timestampNs - detectionCompletedNs : 0ULL;
 			csvSample.frameWidth = width;
 			csvSample.frameHeight = height;
 			csvSample.objectCount = static_cast<int>(objects.size());
@@ -807,6 +860,22 @@ if (tf->zoomObject == "group") {
 			csvSample.actionBox = boundingBox;
 			csvSample.cropBox = tf->trackingRect;
 			csvSample.directorApplied = tf->directorAIEnabled && tf->lastDirectorAIFrame.valid;
+			csvSample.asyncEnabled = tf->asyncInferenceEnabled;
+			csvSample.resultFresh = detectionsFresh;
+			csvSample.resultAgeMs = (float)csvResultAgeNs / 1000000.0f;
+			csvSample.resultCompletionAgeMs = (float)csvCompletionAgeNs / 1000000.0f;
+			csvSample.inferenceMs = detectionInferenceMs;
+			csvSample.asyncWorkerBusy = asyncTelemetryAfter.workerBusy;
+			csvSample.asyncTaskPending = asyncTelemetryAfter.taskPending;
+			csvSample.asyncReplacedCount = asyncTelemetryAfter.replacedCount;
+			csvSample.asyncResultOverwrittenCount = asyncTelemetryAfter.resultOverwrittenCount;
+			csvSample.asyncSubmittedCount = asyncTelemetryAfter.submittedCount;
+			csvSample.asyncCompletedCount = asyncTelemetryAfter.completedCount;
+			csvSample.asyncPendingSequence = asyncTelemetryAfter.pendingSequence;
+			csvSample.resultSequence = detectionSequence;
+			csvSample.appliedSequence = detectionSequence;
+			csvSample.directorMeasurementState = directorMeasurementState;
+			csvSample.directorMeasurementAgeMs = (float)csvResultAgeNs / 1000000.0f;
 			sport_eyes_write_csv_logs(tf, csvSample);
         }
 }

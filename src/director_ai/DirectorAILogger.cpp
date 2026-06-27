@@ -6,7 +6,7 @@ namespace director_ai {
 
 std::string director_ai_csv_header()
 {
-	return "timestamp_ns,valid,applied_to_crop,current_x,current_y,predicted_x,predicted_y,lead_px,clamped,confidence_gate,confidence,velocity_x,velocity_y,transition_probability,direction,court_x,court_y,court_third,crop_x,crop_y,crop_w,crop_h";
+	return "timestamp_ns,valid,applied_to_crop,current_x,current_y,predicted_x,predicted_y,lead_px,clamped,confidence_gate,confidence,velocity_x,velocity_y,transition_probability,direction,court_x,court_y,court_third,crop_x,crop_y,crop_w,crop_h,measurement_state,measurement_age_ms,result_fresh,result_sequence,async_inference_ms,async_worker_busy,pending_replaced_count";
 }
 
 std::string director_ai_csv_row(const DirectorAILogRow &row)
@@ -34,7 +34,14 @@ std::string director_ai_csv_row(const DirectorAILogRow &row)
 	    << f.camera.crop_rect.x << ','
 	    << f.camera.crop_rect.y << ','
 	    << f.camera.crop_rect.width << ','
-	    << f.camera.crop_rect.height;
+	    << f.camera.crop_rect.height << ','
+	    << row.measurement_state << ','
+	    << row.measurement_age_ms << ','
+	    << (row.result_fresh ? 1 : 0) << ','
+	    << row.result_sequence << ','
+	    << row.async_inference_ms << ','
+	    << (row.async_worker_busy ? 1 : 0) << ','
+	    << row.pending_replaced_count;
 	return out.str();
 }
 

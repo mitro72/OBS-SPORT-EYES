@@ -46,6 +46,8 @@ struct filter_data {
 	// Tracking configuration can be loaded before OBS attaches this filter to its parent.
 	// Keep this flag until Crop/Scale filters are actually attached.
 	bool trackingSetupPending = false;
+	// Delay helper creation briefly while OBS restores serialized source filters.
+	uint32_t trackingSetupGraceTicks = 0;
 	cv::Rect2f trackingRect;
 	int lastDetectedObjectId;
 	bool sortTracking;
@@ -98,10 +100,16 @@ struct filter_data {
 	uint64_t asyncInferenceLastSubmitNs = 0;
 	uint64_t asyncInferenceGeneration = 0;
 	uint64_t asyncInferencePendingGeneration = 0;
+	// Monotonic task sequence numbers make it possible to distinguish a fresh
+	// detection from a reused/cached result in diagnostics.
+	uint64_t asyncInferenceNextSequence = 0;
+	uint64_t asyncInferencePendingSequence = 0;
+	uint64_t asyncInferenceResultSequence = 0;
 	float asyncInferenceLastMs = 0.0f;
 	uint64_t asyncInferenceSubmitted = 0;
 	uint64_t asyncInferenceCompleted = 0;
 	uint64_t asyncInferenceReplaced = 0;
+	uint64_t asyncInferenceResultOverwritten = 0;
 	// openvino
 	std::unique_ptr<IDetectorModel> model;
 	//std::unique_ptr<ONNXRuntimeModel> onnxruntimemodel;

@@ -11,11 +11,14 @@
 #endif
 
 struct Object {
-	cv::Rect_<float> rect;
-	int label;
-	float prob;
-	uint64_t id;
-	uint64_t unseenFrames;
+	// Detector backends construct Object directly before SORT assigns identity/state.
+	// Initialise every scalar so cached raw detections remain safe to inspect between
+	// inference results (particularly when "Hide unseen objects" is enabled).
+	cv::Rect_<float> rect{};
+	int label = -1;
+	float prob = 0.0f;
+	uint64_t id = 0;
+	uint64_t unseenFrames = 0;
 	cv::KalmanFilter kf;
 };
 
