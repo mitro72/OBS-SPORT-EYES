@@ -1,36 +1,37 @@
 # OBS Sport Eyes
 
-**OBS Sport Eyes** è un filtro OBS pensato per la ripresa automatica di eventi sportivi, con particolare attenzione al basket e alle camere panoramiche / 180°.
+**OBS Sport Eyes** è un filtro OBS per la ripresa automatica di eventi sportivi, progettato in particolare per il basket con camere panoramiche e 180°.
 
-Il plugin analizza il video tramite modelli di object detection eseguiti con **OpenVINO**, individua i giocatori e costruisce un'inquadratura dinamica da applicare alla sorgente. L'obiettivo non è semplicemente “seguire l'oggetto più grande”, ma mantenere una ripresa leggibile dell'azione: stabile nei possessi, pronta sui cambi di lato e resistente a panchine, pubblico e rilevazioni marginali.
+Il plugin usa modelli di object detection eseguiti tramite **OpenVINO** per rilevare i giocatori, individuare il nucleo dell’azione e generare un crop dinamico. L’obiettivo non è semplicemente seguire il soggetto più grande: è mantenere una ripresa leggibile, stabile nei possessi e pronta nei cambi di lato, limitando l’influenza di panchine, pubblico e rilevazioni marginali.
 
-Questa repository contiene la versione **1.10.0m** del progetto.
-
-> Stato del progetto: sviluppo sperimentale, orientato a test sul campo. Prima di usare una build in una partita importante, eseguire sempre una prova con la stessa camera, risoluzione e rete previste per la diretta.
+> Versione documentata: **v1.10.0n**
+>
+> Stato del progetto: sviluppo sperimentale e test sul campo. Prima di usarlo in una partita importante, prova sempre la stessa camera, risoluzione, posizione di montaggio e rete previste per la diretta.
 
 ---
 
 ## Cosa fa
 
-- Rileva persone e oggetti tramite modelli OpenVINO.
-- Genera un crop/zoom automatico per sorgenti video molto larghe, incluse riprese 180°.
-- Supporta modalità di selezione basate su singolo soggetto, soggetto più grande, tutti gli oggetti o **gruppo di giocatori**.
-- Usa clustering di prossimità per dare priorità al nucleo dell'azione.
-- Applica una **Safe ROI** per limitare l'influenza di panchine, tribune e zone laterali indesiderate.
-- Integra **Director AI**, un livello di previsione temporale che stima movimento, direzione dell'azione e transizioni rapide.
-- Include inferenza realmente asincrona con politica **latest-frame**, progettata per evitare che il tracking insegua frame vecchi quando il sistema è sotto carico.
-- Espone log CSV per analizzare stabilità, crop, rilevamenti e comportamento del Director AI.
-- Mantiene la compatibilità con le scene create con il precedente filtro `detect-filter`.
+- Rileva persone e oggetti con modelli OpenVINO.
+- Genera un crop/zoom automatico per sorgenti molto larghe, incluse le riprese 180°.
+- Supporta framing su singolo soggetto, soggetto più grande, tutti gli oggetti o **gruppo di giocatori**.
+- Usa **group clustering** per dare priorità al nucleo dell’azione.
+- Applica una **Safe ROI** per ridurre l’influenza di panchine, tribune e bordi del campo.
+- Include **Director AI**, con predizione temporale di movimento e assistenza nelle transizioni rapide.
+- Usa inferenza asincrona **latest-frame**, per evitare di inseguire frame ormai vecchi quando il sistema è sotto carico.
+- Produce CSV diagnostici per analizzare latenza, tracking, crop e Director AI.
+- Gestisce profili configurazione locali e file JSON importabili/esportabili.
+- Mantiene la compatibilità con le scene create con il precedente source ID `detect-filter`.
 
 ---
 
-## Architettura della soluzione
+## Architettura
 
 ```text
 Sorgente video OBS
         │
         ▼
-Pre-elaborazione / ROI / scala inferenza
+Pre-elaborazione / Safe ROI / scala inferenza
         │
         ▼
 OpenVINO object detection
@@ -40,30 +41,28 @@ OpenVINO object detection
         └── Safe ROI filtering
         │
         ▼
-Director AI + Motion prediction
+Director AI + motion prediction
         │
         ▼
 Crop controller / smoothing / deadband
         │
         ▼
-Filtro crop e scale OBS
+Crop/Pad + Scale helper filters OBS
         │
         ▼
 Output OBS / recording / streaming
 ```
 
-### Inferenza asincrona “latest-frame”
+### Inferenza asincrona latest-frame
 
-Con **Async Inference** attiva, il thread video di OBS non rimane bloccato in attesa dell'inferenza.
+Con **Async Inference** attiva, il thread video di OBS non attende il detector. Il worker mantiene al massimo:
 
-Il worker mantiene al massimo:
-
-- un'inferenza in corso;
+- un’inferenza in corso;
 - un solo frame pendente.
 
-Quando il worker è occupato, un frame nuovo sostituisce il frame pendente precedente. In questo modo il sistema può ridurre la frequenza effettiva di analisi sotto carico, ma evita di accumulare una coda di frame datati che produrrebbe un crop sempre in ritardo rispetto all'azione reale.
+Quando il worker è occupato, un frame nuovo sostituisce quello pendente invece di creare una coda. Il sistema può quindi ridurre la frequenza effettiva di analisi sotto carico, ma evita di applicare crop basati su una sequenza sempre più vecchia di frame.
 
-I risultati portano con sé timestamp di cattura e origine della ROI. SORT e Director AI ricevono solo misure nuove; i risultati memorizzati vengono usati per continuità visiva, senza falsare il calcolo della velocità.
+I risultati mantengono timestamp e origine ROI. **SORT** e **Director AI** ricevono soltanto detection fresche; i risultati cached servono alla continuità visiva e non vengono riusati come nuove osservazioni di velocità.
 
 ---
 
@@ -71,89 +70,48 @@ I risultati portano con sé timestamp di cattura e origine della ROI. SORT e Dir
 
 ### Tracking e framing sportivo
 
-Il filtro può seguire diverse strategie di inquadratura:
+| Strategia | Uso pratico |
+|---|---|
+| **Single first** | Segue il primo oggetto valido. |
+| **Biggest** | Privilegia la rilevazione più grande. |
+| **Oldest** | Mantiene l’oggetto tracciato da più tempo. |
+| **All** | Considera l’insieme delle rilevazioni. |
+| **Group** | Crea cluster di giocatori e seleziona il gruppo più rilevante. |
 
-- **Single first**: privilegia il primo oggetto valido.
-- **Biggest**: segue la rilevazione più grande.
-- **Oldest**: mantiene l'oggetto tracciato da più tempo.
-- **All**: considera l'insieme delle rilevazioni.
-- **Group**: crea cluster di giocatori e seleziona il gruppo più rilevante per l'azione.
-
-La modalità **Group** è la più adatta al basket: invece di inseguire un singolo atleta, tende a inquadrare il gruppo che rappresenta il possesso o la zona attiva del campo.
+Per il basket, **Group** è normalmente l’impostazione consigliata: evita di inseguire un singolo atleta e tende a mantenere dentro il crop l’area dove si sviluppa il possesso.
 
 ### Safe ROI
 
-La Safe ROI definisce margini sinistro, destro, superiore e inferiore da trattare con maggiore prudenza. È utile soprattutto quando la camera riprende anche:
+La Safe ROI definisce margini sinistro, destro, superiore e inferiore trattati con prudenza. È utile quando la camera include:
 
 - panchine;
-- arbitri o persone a bordo campo;
+- arbitri e persone a bordo campo;
 - pubblico;
 - cartellonistica;
 - ingressi laterali.
 
-Il parametro **Safe ROI Hold** evita che il crop reagisca immediatamente a un oggetto esterno alla zona utile, mentre **Cluster inertia** riduce i cambi continui tra gruppi simili.
+**Safe ROI Hold** mantiene per un breve periodo l’ultima decisione valida prima del fallback. **Cluster inertia** richiede una breve conferma prima di sostituire il gruppo attivo con un altro cluster concorrente.
 
 ### Director AI
 
-Director AI aggiunge una previsione temporale al crop tradizionale. Usa le misure recenti per stimare:
+Director AI aggiunge una previsione temporale al crop tradizionale. Stima:
 
-- velocità orizzontale dell'azione;
-- direzione del movimento;
-- transizioni rapide;
-- centro previsto dell'inquadratura;
-- anticipo massimo applicabile.
+- velocità e direzione dell’azione;
+- probabilità di transizione rapida;
+- centro previsto dell’inquadratura;
+- anticipo massimo applicabile;
+- confidence della misura.
 
-Non sostituisce il detector: usa il detector come misura e interviene per ridurre il ritardo percepito nelle azioni veloci.
+Non sostituisce il detector: usa le detection come misura per ridurre il ritardo percepito nei contropiedi e nei cambi campo.
 
 ### Diagnostica CSV
 
-Il checkbox **Abilita log CSV** rende visibili due percorsi configurabili:
+Abilitando **CSV Logging** diventano disponibili due destinazioni:
 
-- **CSV Diagnostica unificata**: rilevazioni, oggetti, gruppo selezionato, Safe ROI, crop e stato del tracking.
-- **CSV Director AI**: centro misurato/predetto, velocità, confidence, lead, transizioni e piano di crop.
+- **CSV Diagnostica unificata**: oggetti, gruppo selezionato, Safe ROI, crop, stato tracking e telemetria async.
+- **CSV Director AI**: centro misurato e predetto, velocità, confidence, lead, transizioni e piano crop.
 
-I CSV sono pensati per confrontare configurazioni diverse e misurare oggettivamente ritardo, jitter, overshoot e stabilità del framing.
-
----
-
-## Interfaccia e parametri chiave
-
-### Tracking
-
-| Parametro | Funzione pratica |
-|---|---|
-| **Zoom factor** | Quanta parte della sorgente viene mantenuta nell'inquadratura. |
-| **Zoom speed factor** | Velocità di adattamento dello zoom. |
-| **X pan preset** | Modalità di posizionamento orizzontale: Auto, Left, Center, Right, Auto Snap e Auto Snap Smooth. |
-| **X snap hysteresis** | Evita passaggi troppo frequenti tra aree laterali e centro. |
-| **Async Inference** | Attiva il worker di inferenza non bloccante. |
-| **Infer interval** | Intervallo minimo tra richieste di inferenza. |
-| **Infer scale** | Scala del frame usata dal detector; valori più alti aumentano dettaglio e carico. |
-| **X deadband** | Zona morta che riduce micro-correzioni del pan. |
-| **Zoom object** | Strategia di selezione: singolo, più grande, più vecchio, tutti o gruppo. |
-
-### Group / Safe ROI
-
-| Parametro | Funzione pratica |
-|---|---|
-| **Group min people** | Numero minimo di persone necessario per validare un gruppo. |
-| **GroupMaxDistFrac** | Distanza massima fra persone dello stesso cluster, espressa come frazione della larghezza frame. |
-| **Strict min people** | Richiede rigidamente il numero minimo di persone. |
-| **Safe ROI margins** | Margini da proteggere da rilevazioni laterali o non pertinenti. |
-| **Safe ROI Hold** | Tempo di conferma prima di reagire a eventi nella zona protetta. |
-| **Cluster inertia** | Riduce cambi rapidi tra cluster concorrenti. |
-
-### Director AI
-
-| Parametro | Funzione pratica |
-|---|---|
-| **Prediction horizon** | Anticipo desiderato, in millisecondi, rispetto alla misura rilevata. |
-| **Velocity smoothing** | Filtra la velocità stimata; valori più alti reagiscono più rapidamente ma possono aumentare instabilità. |
-| **History samples** | Numero di campioni usati per la stima temporale. |
-| **Base coverage** | Copertura minima dell'azione desiderata nel crop. |
-| **Fast transition speed** | Soglia oltre cui il movimento viene trattato come transizione veloce. |
-| **Max prediction lead** | Limite massimo dell'anticipo spaziale applicabile. |
-| **Min confidence** | Confidence minima per applicare la previsione. |
+I CSV servono per confrontare configurazioni e misurare oggettivamente latenza, jitter, overshoot, stabilità del gruppo e continuità delle detection.
 
 ---
 
@@ -161,50 +119,87 @@ I CSV sono pensati per confrontare configurazioni diverse e misurare oggettivame
 
 Nelle proprietà del filtro è disponibile il gruppo **Configuration Profiles**.
 
-- I preset **Basket 180 - Balanced**, **Reactive** e **Conservative** applicano tuning sportivo senza modificare modello, device, percorso del modello esterno o destinazioni CSV locali.
-- **Save / update profile** salva la configurazione corrente nella libreria locale del plugin; un nome già esistente viene aggiornato.
-- **Apply selected profile** applica un preset o un profilo salvato.
+### Profili inclusi
+
+| Profilo | Quando usarlo |
+|---|---|
+| **Basket 180 – Balanced** | Punto di partenza consigliato: compromesso fra stabilità e reattività. |
+| **Basket 180 – Reactive** | Per contropiedi e cambi campo frequenti; più pronto, ma potenzialmente più nervoso. |
+| **Basket 180 – Conservative** | Per camere o palestre con detection instabili; privilegia una ripresa ferma. |
+
+I preset modificano il tuning sportivo, preservando modello selezionato, device OpenVINO, percorso del modello esterno e percorsi CSV locali.
+
+### Libreria locale, import ed export
+
+- **Apply selected profile** applica un preset o un profilo locale salvato.
+- **Save / update profile** salva la configurazione corrente nella libreria del plugin; lo stesso nome aggiorna il profilo esistente.
+- **Delete selected saved profile** elimina solo profili locali creati dall’operatore.
 - **Export current configuration** crea un JSON portabile.
-- **Import and apply JSON** convalida e applica un JSON; poi **Save / update profile** lo aggiunge alla libreria locale.
+- **Import and apply JSON** controlla e applica un JSON; poi puoi salvarlo nella libreria locale.
 
-I JSON sono versionati tramite `format: "obs-sport-eyes-profile"` e `schema_version: 1`. Vengono importati solo i parametri supportati; non vengono importati scene OBS, filtri helper o stato runtime. La documentazione del formato è in [`docs/README_v1.10.0m_Configuration_Profiles.md`](docs/README_v1.10.0m_Configuration_Profiles.md).
+Il formato è versionato:
 
-## Configurazione iniziale consigliata
+```json
+{
+  "format": "obs-sport-eyes-profile",
+  "schema_version": 1,
+  "profile_name": "Basket 180 - Palestra",
+  "settings": {
+    "tracking_group": true,
+    "zoom_object": "group",
+    "async_inference_enabled": true,
+    "infer_interval_ms": 50,
+    "director_ai_enabled": true
+  }
+}
+```
 
-Per una prima prova con basket e sorgente 180°:
+L’import applica soltanto impostazioni supportate. Non importa scene OBS, filtri helper, oggetti rilevati, cache async o altro stato runtime.
+
+> **Compatibilità v1.10.0n:** l’export costruisce i valori effettivi combinando default e configurazione corrente con API `obs_data` disponibili anche negli SDK OBS che non espongono `obs_data_get_json_with_defaults`.
+
+### Profilo PanaCast 180 4K
+
+Nel repository è disponibile anche:
+
+```text
+profiles/PanaCast_180_4K_5m_6m_Sideline.json
+```
+
+È un punto di partenza per una **Jabra PanaCast 180 4K** montata circa **5 m** sopra il campo e **6 m** oltre la linea laterale. Mantiene un crop leggermente più ampio, protegge i margini laterali e la fascia bassa esposta a panchine e persone fuori dal gioco, senza rinunciare alla reattività nelle transizioni laterali.
+
+---
+
+## Configurazione iniziale consigliata per basket 180°
 
 ```text
 Async Inference:        ON
-Async Motion Prediction: ON
 Infer interval:          50 ms
 Infer scale:             1.00
 Director AI:             ON
 Zoom object:             Group
+Zoom factor:             0.50
 Safe ROI Hold:           300 ms
 Cluster inertia:         150 ms
 ```
 
-Questi valori sono un punto di partenza, non un preset universale. La configurazione dipende da risoluzione, FPS, posizione della camera, larghezza del campo visibile, potenza GPU/CPU e modello di rilevazione.
+Questi valori sono un punto di partenza, non un preset universale. Il tuning dipende da risoluzione, FPS, posizione della camera, porzione di campo inquadrata, qualità del modello e potenza CPU/GPU.
 
 ---
 
-## Installazione e prerequisiti (Windows x64)
+## Prerequisiti Windows x64
 
-Questa sezione descrive l'ambiente consigliato per compilare e usare OBS Sport Eyes su Windows 10/11 a 64 bit. È pensata per una macchina di sviluppo locale, non per distribuire dipendenze dentro OBS.
+### Software richiesto
 
-### 1. Software richiesto
+- Git for Windows
+- Visual Studio 2022 Community oppure Build Tools 2022 con **Desktop development with C++**
+- Windows 10/11 SDK e toolset **MSVC v143 x64/x86**
+- CMake nel PATH
+- PowerShell 7
+- OBS Studio x64
+- OpenVINO Runtime
 
-Installa questi componenti prima di configurare il progetto:
-
-- **Git for Windows**, necessario per clonare/aggiornare repository e per gli script che recuperano dipendenze.
-- **Visual Studio 2022 Community** o Build Tools 2022, con il workload **Desktop development with C++**.
-- **Windows 10/11 SDK** e toolset **MSVC v143 x64/x86**.
-- **CMake** recente, disponibile nel PATH.
-- **PowerShell 7**, usato dallo script `Build-Windows.ps1`.
-- **vcpkg**, usato per installare OpenVINO e rendere disponibile il relativo package CMake.
-- **OBS Studio x64** per eseguire il plugin compilato.
-
-Nel Visual Studio Installer verifica in particolare questi componenti:
+Nel Visual Studio Installer verifica almeno:
 
 ```text
 Desktop development with C++
@@ -213,100 +208,27 @@ Windows 10 SDK oppure Windows 11 SDK
 C++ CMake tools for Windows
 ```
 
-Verifica da PowerShell che gli strumenti siano visibili:
+### OpenVINO
 
-```powershell
-Git --version
-cmake --version
-pwsh --version
-```
-
-> È normale che `cl.exe` non sia disponibile in una PowerShell normale: CMake richiama automaticamente Visual Studio 2022 tramite il proprio generatore/preset.
-
-### 2. Installare o inizializzare vcpkg
-
-La configurazione di riferimento usa vcpkg in:
+La configurazione usata nel progetto può puntare direttamente al runtime Intel installato, ad esempio:
 
 ```text
-C:\vcpkg
+C:\Program Files\Intel\openvino_2024\runtime\cmake\OpenVINOConfig.cmake
 ```
 
-Se non hai già vcpkg:
+In alternativa puoi usare un’installazione OpenVINO gestita da vcpkg.
+
+Verifica il percorso Intel:
 
 ```powershell
-cd C:\
-git clone https://github.com/microsoft/vcpkg.git
-cd C:\vcpkg
-.\bootstrap-vcpkg.bat
+Test-Path "C:\Program Files\Intel\openvino_2024\runtime\cmake\OpenVINOConfig.cmake"
 ```
 
-Verifica l'installazione:
+L’output atteso è `True`.
 
-```powershell
-C:\vcpkg\vcpkg.exe version
-```
+---
 
-### 3. Installare OpenVINO tramite vcpkg
-
-Installa OpenVINO per la tripla Windows x64:
-
-```powershell
-cd C:\vcpkg
-.\vcpkg.exe install openvino:x64-windows
-```
-
-Al termine, il file cercato da CMake deve essere presente qui:
-
-```text
-C:\vcpkg\installed\x64-windows\share\openvino\OpenVINOConfig.cmake
-```
-
-Verifica esplicitamente:
-
-```powershell
-Test-Path "C:\vcpkg\installed\x64-windows\share\openvino\OpenVINOConfig.cmake"
-```
-
-L'output atteso è:
-
-```text
-True
-```
-
-Prima di compilare il plugin, nella stessa finestra PowerShell imposta:
-
-```powershell
-$env:OpenVINO_DIR = "C:\vcpkg\installed\x64-windows\share\openvino"
-```
-
-Puoi controllare il valore effettivo:
-
-```powershell
-$env:OpenVINO_DIR
-```
-
-#### Aggiornare OpenVINO con vcpkg
-
-Prima aggiorna il repository dei port e controlla il piano di aggiornamento:
-
-```powershell
-cd C:\vcpkg
-git pull
-.\vcpkg.exe update
-.\vcpkg.exe upgrade openvino:x64-windows
-```
-
-L'ultimo comando è un **dry-run**: mostra cosa cambierà senza installare nulla. Per confermare l'upgrade:
-
-```powershell
-.\vcpkg.exe upgrade openvino:x64-windows --no-dry-run
-```
-
-Dopo l'aggiornamento, elimina `build_x64` del plugin e riconfigura CMake, per evitare riferimenti a librerie OpenVINO precedenti.
-
-### 4. Recuperare il sorgente
-
-Clona la repository o usa una copia locale già estratta:
+## Recuperare il sorgente
 
 ```powershell
 cd C:\Users\MITRO\Downloads\dev
@@ -314,34 +236,7 @@ git clone https://github.com/mitro72/OBS-SPORT-EYES.git
 cd .\OBS-SPORT-EYES
 ```
 
-Se la repository è privata, Git richiederà l'autenticazione GitHub. Controlla di essere nella root del progetto: devono essere presenti `CMakeLists.txt`, `CMakePresets.json`, `buildspec.json` e `src\`.
-
-### 5. Dipendenze risolte dalla build
-
-Non è necessario installare manualmente `libobs` o OpenCV come pacchetti di sistema. Lo script/preset di build risolve le dipendenze previste dal progetto, incluse quelle OBS e OpenCV, durante la prima configurazione; per questo la prima build richiede connessione Internet.
-
-OpenVINO è l'eccezione principale: deve essere già disponibile tramite vcpkg e raggiungibile con `OpenVINO_DIR`.
-
-### 6. Verifica prima della compilazione
-
-Dalla root del progetto esegui:
-
-```powershell
-$env:OpenVINO_DIR = "C:\vcpkg\installed\x64-windows\share\openvino"
-Test-Path "$env:OpenVINO_DIR\OpenVINOConfig.cmake"
-```
-
-Se il secondo comando restituisce `False`, non avviare la build: correggi prima l'installazione OpenVINO/vcpkg.
-
-### Problemi comuni di prerequisiti
-
-| Sintomo | Causa probabile | Correzione |
-|---|---|---|
-| `OpenVINOConfig.cmake` non trovato | `OpenVINO_DIR` non impostato o package non installato | Installa `openvino:x64-windows`, poi imposta `OpenVINO_DIR`. |
-| `LibObsConfig.cmake` non trovato | Configurazione incompleta o dipendenze OBS non recuperate | Elimina `build_x64` e rilancia lo script con Internet disponibile. |
-| `cl.exe` / compilatore C++ non trovato | Workload C++ o SDK mancanti | Modifica Visual Studio 2022 e installa Desktop development with C++. |
-| `pwsh` non riconosciuto | PowerShell 7 non installato o non nel PATH | Installa PowerShell 7 e riapri il terminale. |
-| DLL caricata ma OpenVINO non parte | Runtime OpenVINO non raggiungibile dall'ambiente | Verifica installazione x64 e la presenza delle DLL OpenVINO nel PATH/runtime previsto. |
+Se la repository è privata, Git richiederà l’autenticazione GitHub.
 
 ---
 
@@ -350,24 +245,35 @@ Se il secondo comando restituisce `False`, non avviare la build: correggi prima 
 Dalla root della repository:
 
 ```powershell
-cd C:\percorso\OBS-SPORT-EYES
+cd C:\Users\MITRO\Downloads\dev\OBS-SPORT-EYES
+
+$env:OpenVINO_DIR = "C:\Program Files\Intel\openvino_2024\runtime\cmake"
+
+pwsh .\.github\scripts\Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
+```
+
+In alternativa, se usi vcpkg:
+
+```powershell
 $env:OpenVINO_DIR = "C:\vcpkg\installed\x64-windows\share\openvino"
 pwsh .\.github\scripts\Build-Windows.ps1 -Target x64 -Configuration RelWithDebInfo
 ```
 
-In alternativa, usando CMake direttamente:
-
-```powershell
-cmake --preset windows-x64 -DOpenVINO_DIR="$env:OpenVINO_DIR"
-cmake --build --preset windows-x64 --config RelWithDebInfo --parallel
-cmake --install build_x64 --prefix .\release\RelWithDebInfo --config RelWithDebInfo
-```
-
-L'output atteso include:
+L’output atteso include:
 
 ```text
 release\RelWithDebInfo\obs-plugins\64bit\obs-sport-eyes.dll
 ```
+
+### Problemi comuni
+
+| Sintomo | Causa probabile | Correzione |
+|---|---|---|
+| `OpenVINOConfig.cmake` non trovato | `OpenVINO_DIR` errato o runtime assente | Verifica il percorso Intel OpenVINO o quello vcpkg. |
+| `LibObsConfig.cmake` non trovato | Configurazione incompleta o dipendenze OBS non recuperate | Elimina `build_x64` e rilancia la build con connessione disponibile. |
+| `cl.exe` / compilatore C++ non trovato | Workload C++ o SDK mancanti | Installa Desktop development with C++. |
+| `pwsh` non riconosciuto | PowerShell 7 non installato o non nel PATH | Installa PowerShell 7 e riapri il terminale. |
+| `obs_data_get_json_with_defaults` non trovato | Codice precedente alla correzione v1.10.0n | Aggiorna `SportEyesProfileManager.cpp` alla versione v1.10.0n. |
 
 ---
 
@@ -391,7 +297,7 @@ C:\Program Files\obs-studio\data\obs-plugins\obs-sport-eyes\
 
 ### Migrazione dal vecchio modulo
 
-Il modulo installa la nuova identità `obs-sport-eyes` e registra anche il vecchio source ID `detect-filter` per preservare le scene esistenti.
+Il modulo registra l’identità `obs-sport-eyes` e anche il legacy source ID `detect-filter`, così le scene esistenti possono continuare a funzionare.
 
 Non lasciare contemporaneamente nella cartella plugin:
 
@@ -400,7 +306,7 @@ obs-detect.dll
 obs-sport-eyes.dll
 ```
 
-Entrambe potrebbero cercare di registrare il legacy ID `detect-filter`. Durante la migrazione, conserva una copia di backup del vecchio plugin fuori dalla cartella di OBS e installa solo la nuova DLL.
+Entrambe possono cercare di registrare `detect-filter`. Mantieni una copia del vecchio plugin fuori dalla cartella OBS e installa solo la nuova DLL.
 
 ---
 
@@ -408,63 +314,46 @@ Entrambe potrebbero cercare di registrare il legacy ID `detect-filter`. Durante 
 
 ```text
 src/
-├── filter/                 # Proprietà OBS, default, lifecycle e start-up tracking
-├── pipeline/               # video_tick e inferenza asincrona latest-frame
-├── sport/                  # Group clustering e logica Safe ROI collegata
-├── director_ai/            # Stato temporale, planner camera, previsione e log Director
-├── diagnostics/            # Scrittura log CSV
-├── render/                 # Render OBS del filtro
-├── sort/                   # Multi-object tracking SORT
-├── edgeyolo/               # Detector OpenVINO EdgeYOLO
-├── yunet/                  # Adapter YuNet / OpenVINO
-└── obs-utils/              # Helper OBS
+├── config/                  # Profili locali, import ed export JSON
+├── filter/                  # Proprietà OBS, default, lifecycle e start-up tracking
+├── pipeline/                # video_tick e inferenza asincrona latest-frame
+├── sport/                   # Group clustering e logica Safe ROI
+├── director_ai/             # Stato temporale, planner camera e previsione
+├── diagnostics/             # Scrittura CSV
+├── render/                  # Render OBS del filtro
+├── sort/                    # Multi-object tracking SORT
+├── edgeyolo/                # Detector OpenVINO EdgeYOLO
+├── yunet/                   # Adapter YuNet / OpenVINO
+└── obs-utils/               # Helper OBS
+
+profiles/                    # JSON pronti da importare
 ```
 
-L'obiettivo della separazione è mantenere `detect-filter.cpp` come sottile facciata OBS, lasciando pipeline, GUI, rendering, clustering e lifecycle in moduli distinti e più verificabili.
+`detect-filter.cpp` resta una facciata OBS sottile; pipeline, GUI, rendering, clustering, lifecycle e gestione dei profili sono isolati in moduli distinti.
 
 ---
 
 ## Test e diagnostica
 
-Per valutare una modifica non basarti solo sulla percezione live. Usa una clip di test ripetibile e confronta:
+Per valutare modifiche o profili, usa una clip di test ripetibile e confronta:
 
-- ritardo del crop rispetto al cambio di lato;
+- ritardo del crop nei cambi di lato;
+- jitter durante possessi statici;
 - numero e ampiezza delle micro-correzioni;
-- jitter nel possesso statico;
 - overshoot dopo un contropiede;
-- tempo di recupero dopo rilevazioni errate o perdita del gruppo;
-- età del risultato di inferenza;
-- stabilità del gruppo selezionato.
+- tempo di recupero dopo errori di detection;
+- età del risultato d’inferenza;
+- stabilità del gruppo selezionato;
+- frequenza di `safe_roi_hold` e detection vuote.
 
-Con Async Inference attiva, sotto carico il sistema può eseguire meno inferenze, ma non dovrebbe degradare in una sequenza di crop basati su frame sempre più vecchi.
+Con Async Inference attiva, sotto carico il sistema può analizzare meno frame, ma non dovrebbe creare una coda di crop basati su frame progressivamente più vecchi.
 
 ---
 
 ## Limitazioni note
 
-- Il risultato dipende fortemente dalla qualità e dall'angolo della camera.
-- Il rilevamento persone non equivale a riconoscimento del pallone, del canestro, delle squadre o delle azioni statistiche.
-- Una risoluzione di inferenza più alta migliora il dettaglio, ma richiede più risorse e può ridurre la frequenza effettiva di analisi.
+- Il risultato dipende fortemente da posizione, altezza, ottica e qualità della camera.
+- Il rilevamento persone non equivale al riconoscimento di palla, canestro, squadre o statistiche di gioco.
+- Una scala di inferenza più alta può aumentare il dettaglio, ma richiede più risorse e può ridurre la frequenza effettiva di analisi.
 - Director AI può migliorare la reattività, ma parametri troppo aggressivi producono overshoot o instabilità.
 - La pipeline asincrona privilegia la freschezza del frame rispetto alla copertura di ogni singolo frame: è una scelta deliberata per lo streaming live.
-
----
-
-## Origine e licenza
-
-OBS Sport Eyes deriva dal lavoro svolto sul progetto `obs-detect` e include modifiche specifiche per la ripresa sportiva, la gestione di camere panoramiche, il clustering e il Director AI.
-
-Il repository è distribuito secondo i termini della **GNU General Public License v2.0**. Consultare il file `LICENSE` per il testo completo.
-
----
-
-## Contributi
-
-Per rendere una modifica verificabile:
-
-1. descrivere il problema osservato e le condizioni del test;
-2. indicare camera, risoluzione, FPS, backend di inferenza e parametri rilevanti;
-3. allegare, quando possibile, clip breve e CSV diagnostici;
-4. evitare modifiche che mescolino refactor, tuning e nuove funzionalità nello stesso commit;
-5. confrontare sempre il comportamento con una configurazione di riferimento.
-
