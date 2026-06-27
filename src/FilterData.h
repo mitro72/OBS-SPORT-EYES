@@ -134,6 +134,10 @@ struct filter_data {
 	bool diagnosticsCsvOpenErrorLogged = false;
 	bool directorCsvOpenErrorLogged = false;
 
+	// Profile library UI status. Stored in memory so transient success/error messages
+	// do not become part of an exported configuration.
+	std::string profileStatus;
+
 #if _WIN32
 	std::wstring modelFilepath;
 #else
