@@ -117,6 +117,10 @@ struct detect_filter : public filter_data {
     bool previewGroupClusters = false;
     bool previewGroupClusterLabel = false;
     bool groupEdgeZoomEnabled = false;
+    // Minimum real 2D zoom multiplier while a valid group is active.
+    // 1.0 preserves the historical behavior: no extra zoom around center.
+    float groupEdgeZoomMin = 1.0f;
+    // Maximum real 2D zoom multiplier at the far left/right edge.
     float groupEdgeZoomAmount = 1.0f;
     float groupEdgeZoomCurve = 2.0f;
     float groupEdgeZoomSmooth = 0.60f;
