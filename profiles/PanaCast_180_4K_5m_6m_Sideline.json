@@ -27,6 +27,7 @@
     "group_min_people_strict": false,
     "group_max_dist_frac": 0.14,
     "group_edge_zoom_enabled": false,
+    "group_edge_zoom_min": 1.0,
     "safe_roi_left": 12,
     "safe_roi_right": 12,
     "safe_roi_top": 5,
