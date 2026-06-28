@@ -700,7 +700,15 @@ if (tf->zoomObject == "group") {
 		const float normX = std::clamp(groupCenterX / (float)width, 0.0f, 1.0f);
 		const float edge01 = std::clamp(std::fabs(normX * 2.0f - 1.0f), 0.0f, 1.0f);
 		const float curved = std::pow(edge01, tf->groupEdgeZoomCurve);
-		targetEdgeZoom = std::clamp(1.0f + ((tf->groupEdgeZoomAmount - 1.0f) * curved), 1.0f, 4.0f);
+
+		// Group Edge Zoom Min is the minimum real 2D zoom kept while a
+		// valid group drives the crop. The existing Amount remains the
+		// maximum at the outer edge. With Min = 1.00 the equation is
+		// identical to the pre-v1.10.0o behavior.
+		const float edgeZoomMax = std::clamp(tf->groupEdgeZoomAmount, 1.0f, 4.0f);
+		const float edgeZoomMin = std::clamp(tf->groupEdgeZoomMin, 1.0f, edgeZoomMax);
+		targetEdgeZoom = edgeZoomMin + ((edgeZoomMax - edgeZoomMin) * curved);
+		targetEdgeZoom = std::clamp(targetEdgeZoom, 1.0f, 4.0f);
 	}
 
 	// Smooth the real zoom multiplier itself so the crop size never jumps when entering/leaving the sides.

@@ -280,7 +280,7 @@ obs_properties_t *sport_eyes_filter_properties(void *data)
 		// Show/hide the core tracking controls when the group is enabled/disabled
 		for (auto prop_name : {"zoom_factor", "zoom_object", "zoom_speed_factor", "x_pan_preset",
 				       "x_snap_hysteresis", "x_snap_transition_time", "x_deadband", "async_inference_enabled", "infer_interval_ms", "infer_scale",
-				       "group_min_people", "group_min_people_strict", "group_edge_zoom_enabled", "group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth", "safe_roi_left", "safe_roi_right", "safe_roi_top", "safe_roi_bottom", "safe_roi_hold_ms", "cluster_inertia_ms"}) {
+				       "group_min_people", "group_min_people_strict", "group_edge_zoom_enabled", "group_edge_zoom_min", "group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth", "safe_roi_left", "safe_roi_right", "safe_roi_top", "safe_roi_bottom", "safe_roi_hold_ms", "cluster_inertia_ms"}) {
 			obs_property_t *prop = obs_properties_get(props_, prop_name);
 			if (prop)
 				obs_property_set_visible(prop, enabled);
@@ -306,7 +306,7 @@ obs_properties_t *sport_eyes_filter_properties(void *data)
 		obs_property_t *gez = obs_properties_get(props_, "group_edge_zoom_enabled");
 		if (gez)
 			obs_property_set_visible(gez, enabled && is_group);
-		for (const char *edge_prop_name : {"group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
+		for (const char *edge_prop_name : {"group_edge_zoom_min", "group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
 			obs_property_t *ep = obs_properties_get(props_, edge_prop_name);
 			if (ep)
 				obs_property_set_visible(ep, enabled && is_group && edge_on);
@@ -393,7 +393,7 @@ obs_property_set_modified_callback(zoom_object, [](obs_properties_t *props_, obs
 		obs_property_t *gez = obs_properties_get(props_, "group_edge_zoom_enabled");
 		if (gez)
 			obs_property_set_visible(gez, enabled && is_group);
-		for (const char *edge_prop_name : {"group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
+		for (const char *edge_prop_name : {"group_edge_zoom_min", "group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
 			obs_property_t *ep = obs_properties_get(props_, edge_prop_name);
 			if (ep)
 				obs_property_set_visible(ep, enabled && is_group && edge_on);
@@ -406,6 +406,8 @@ obs_properties_add_float_slider(tracking_group_props, "group_max_dist_frac", obs
 
 	obs_property_t *group_edge_zoom_enabled =
 		obs_properties_add_bool(tracking_group_props, "group_edge_zoom_enabled", "Group edge zoom 2D (U curve)");
+	obs_properties_add_float_slider(tracking_group_props, "group_edge_zoom_min",
+					"Group edge zoom min (x)", 1.00, 4.00, 0.05);
 	obs_properties_add_float_slider(tracking_group_props, "group_edge_zoom_amount",
 					"Group edge zoom max (x)", 1.00, 4.00, 0.05);
 	obs_properties_add_float_slider(tracking_group_props, "group_edge_zoom_curve",
@@ -417,7 +419,7 @@ obs_properties_add_float_slider(tracking_group_props, "group_max_dist_frac", obs
 		const char *zo = obs_data_get_string(settings, "zoom_object");
 		const bool is_group = (zo && strcmp(zo, "group") == 0);
 		const bool edge_on = obs_data_get_bool(settings, "group_edge_zoom_enabled");
-		for (const char *edge_prop_name : {"group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
+		for (const char *edge_prop_name : {"group_edge_zoom_min", "group_edge_zoom_amount", "group_edge_zoom_curve", "group_edge_zoom_smooth"}) {
 			obs_property_t *ep = obs_properties_get(props_, edge_prop_name);
 			if (ep)
 				obs_property_set_visible(ep, enabled && is_group && edge_on);
@@ -425,6 +427,7 @@ obs_properties_add_float_slider(tracking_group_props, "group_max_dist_frac", obs
 		return true;
 	});
 	obs_property_set_visible(group_edge_zoom_enabled, false);
+	obs_property_set_visible(obs_properties_get(tracking_group_props, "group_edge_zoom_min"), false);
 	obs_property_set_visible(obs_properties_get(tracking_group_props, "group_edge_zoom_amount"), false);
 	obs_property_set_visible(obs_properties_get(tracking_group_props, "group_edge_zoom_curve"), false);
 	obs_property_set_visible(obs_properties_get(tracking_group_props, "group_edge_zoom_smooth"), false);

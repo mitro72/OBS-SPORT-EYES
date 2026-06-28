@@ -46,6 +46,7 @@
     "director_ai_min_confidence_to_apply": 0.08,
     "sort_tracking": true,
     "max_unseen_frames": 6,
-    "show_unseen_objects": true
+    "show_unseen_objects": true,
+    "group_edge_zoom_min": 1.0
   }
 }

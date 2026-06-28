@@ -192,6 +192,8 @@ void sport_eyes_filter_defaults(obs_data_t *settings)
 	obs_data_set_default_bool(settings, "group_min_people_strict", false);
 	obs_data_set_default_double(settings, "group_max_dist_frac", 0.15);
 	obs_data_set_default_bool(settings, "group_edge_zoom_enabled", false);
+	// 1.00 retains the previous U-curve: no extra 2D zoom at the center.
+	obs_data_set_default_double(settings, "group_edge_zoom_min", 1.00);
 	obs_data_set_default_double(settings, "group_edge_zoom_amount", 1.20);
 	obs_data_set_default_double(settings, "group_edge_zoom_curve", 2.0);
 	obs_data_set_default_double(settings, "group_edge_zoom_smooth", 0.60);
@@ -253,10 +255,13 @@ void sport_eyes_filter_update(void *data, obs_data_t *settings)
 	tf->groupMaxDistFrac = (float)obs_data_get_double(settings, "group_max_dist_frac");
 	tf->groupMaxDistFrac = std::clamp(tf->groupMaxDistFrac, 0.05f, 0.50f);
 	tf->groupEdgeZoomEnabled = obs_data_get_bool(settings, "group_edge_zoom_enabled");
+	tf->groupEdgeZoomMin = (float)obs_data_get_double(settings, "group_edge_zoom_min");
 	tf->groupEdgeZoomAmount = (float)obs_data_get_double(settings, "group_edge_zoom_amount");
 	tf->groupEdgeZoomCurve = (float)obs_data_get_double(settings, "group_edge_zoom_curve");
 	tf->groupEdgeZoomSmooth = (float)obs_data_get_double(settings, "group_edge_zoom_smooth");
 	tf->groupEdgeZoomAmount = std::clamp(tf->groupEdgeZoomAmount, 1.0f, 4.0f);
+	// A malformed profile must never invert the U-curve.
+	tf->groupEdgeZoomMin = std::clamp(tf->groupEdgeZoomMin, 1.0f, tf->groupEdgeZoomAmount);
 	tf->groupEdgeZoomCurve = std::clamp(tf->groupEdgeZoomCurve, 1.0f, 5.0f);
 	tf->groupEdgeZoomSmooth = std::clamp(tf->groupEdgeZoomSmooth, 0.05f, 2.00f);
 

@@ -1,18 +1,10 @@
-# Build / IDE
 build*/
 release/
 out/
+.deps/
 .vs/
 .idea/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-compile_commands.json
 
-# Generated dependencies
-.deps/
-
-# Binaries and debug artifacts
 *.dll
 *.lib
 *.exp
@@ -21,10 +13,14 @@ compile_commands.json
 *.ilk
 *.exe
 
-# Runtime diagnostics
 *.csv
 *.log
 
-# Local editor / OS files
+cmake/.CMakeBuildNumber
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
 .DS_Store
 Thumbs.db
