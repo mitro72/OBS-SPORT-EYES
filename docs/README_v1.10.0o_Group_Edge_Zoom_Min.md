@@ -30,7 +30,3 @@ Il parametro viene limitato automaticamente tra `1.00` e il valore massimo, cos�
 - `1.00`: impostazione più sicura, identica alle build precedenti.
 - `1.03–1.08`: utile con camera alta/laterale per evitare un ritorno troppo largo quando il gruppo rientra dal bordo.
 - Oltre `1.10`: da usare solo dopo test video; può far apparire il crop troppo stretto in possesso statico.
-<<<<<<< HEAD
-=======
-
->>>>>>> fccbc72 (v1.10.0o profiles JSON and group edge zoom minimum)
